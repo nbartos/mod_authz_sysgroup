@@ -1,0 +1,127 @@
+mod_authz_sysgroup is an authorization module for Apache 2.2.x.
+
+Features
+    * Thread safe (you can use the worker or similar MPM safely).
+    * Uses UNIX system groups (and thus supports anything the system can bind to, e.g. LDAP).
+    * Supports both AND and OR group operations.
+    * Can handle realm information (e.g. from mod_auth_kerb).
+
+
+
+INSTALLATION:
+
+To install, just extract and run:
+
+make
+make install
+
+
+
+CONFIGURATION:
+
+It works similar to mod_authz_groupfile (which was actually used as a template to create this module).
+The main difference in the configuration syntax is a change which allows 'AND' group operations.
+
+Add load the module in httpd.conf:
+LoadModule authz_sysgroup_module modules/mod_authz_sysgroup.so
+
+The option 'AuthzSysGroupAuthoritative' may be specified to allow access control to be passed along to
+lower modules if the 'require group' fails.  (default is On).
+
+The option 'AuthzSysGroupIgnoreSuffix' may be specified to ignore a suffix before checking anything.
+This is intended to be used to strip realm information from something like mod_auth_kerb.
+
+The special require line 'Require valid-system-user' will only check to make sure that the user is a
+valid system user, no group membership will be checked.
+
+CONFIGURATION EXAMPLES:
+
+Using mod_auth_kerb (5.4) for authentication.  Allows elves to access the resource, along with any
+chickens that are also a member of the ITAR group.  REMOTE_USER will end up in the form of 'username'.
+
+<Location /secret>
+    # mod_auth_kerb
+    AuthType Kerberos
+    AuthName "Kerberos Login"
+    KrbAuthRealms EXAMPLE.COM
+    KrbLocalUserMapping on
+
+    # mod_authz_sysgroup
+    Require group ITAR chickens
+    Require group elves
+</Location>
+
+
+Using mod_auth_kerb for authentication.  Allows elves to access the resource, along with any chickens
+that are also a member of the ITAR group.  REMOTE_USER will end up in the form of 'username@EXAMPLE.COM'.
+
+<Location /secret>
+    # mod_auth_kerb
+    AuthType Kerberos
+    AuthName "Kerberos Login"
+    KrbAuthRealms EXAMPLE.COM
+
+    # mod_authz_sysgroup
+    AuthzSysGroupIgnoreSuffix @EXAMPLE.COM
+    Require group ITAR chickens
+    Require group elves
+</Location>
+
+
+A more complicated example using 2 kerberos realms, the system groups, and another ldap server.
+This allows for having the system bound to an MS active directory domain using samba winbind,
+and allowing apache to authenticate against that along with another kerberos and ldap authentication
+system.  This could also support other combinations as well.  REMOTE_USER will end up in the form
+of 'username@AD.EXAMPLE.COM' or 'username@UNIX.EXAMPLE.COM'.
+
+This assumes that the 'cn' attribute in ldap is set to something like 'username@UNIX.EXAMPLE.COM'.
+Note that if you do something like this, it is advisable to either make sure that no username
+exists in both realms, or to disable automatic account locking from login failures.  This is
+because some authentations will fail naturally (when skipping over the 1st realm and going to the 2nd),
+and we don't want some users getting their account locked out due to this behavior.
+
+Note that in my own tests, 'KrbServiceName Any' causes a segfault.  If you experience the same
+issue, you can use 'KrbVerifyKDC off' instead to workaround the problem.  Of course this is less
+secure.
+
+<Location /secret>
+    # mod_auth_kerb
+    AuthType Kerberos
+    AuthName "AD or UNIX"
+    KrbAuthRealms AD.EXAMPLE.COM UNIX.EXAMPLE.COM
+    KrbServiceName Any
+
+    # mod_authz_sysgroup
+    AuthzSysGroupIgnoreSuffix @AD.EXAMPLE.COM
+    AuthzSysGroupAuthoritative off
+    Require group chickens
+
+    # mod_authnz_ldap
+    AuthLDAPURL ldap://127.0.0.1/ou=people,dc=unix,dc=example,dc=com?cn
+    AuthzLDAPAuthoritative off
+    Require ldap-filter &(employeeType=turkey)
+</Location>
+
+
+A similar configuration as above, but allowing any valid user from AD.EXAMPLE.COM and a subset of
+users from UNIX.EXAMPLE.COM.
+
+<Location /secret>
+    # mod_auth_kerb
+    AuthType Kerberos
+    AuthName "AD or UNIX"
+    KrbAuthRealms AD.EXAMPLE.COM UNIX.EXAMPLE.COM
+    KrbServiceName Any
+
+    # mod_authz_sysgroup
+    AuthzSysGroupIgnoreSuffix @AD.EXAMPLE.COM
+    AuthzSysGroupAuthoritative off
+    Require valid-system-user
+
+    # mod_authnz_ldap
+    AuthLDAPURL ldap://127.0.0.1/ou=people,dc=unix,dc=example,dc=com?cn
+    AuthzLDAPAuthoritative off
+    Require ldap-filter &(employeeType=turkey)
+</Location>
+
+
